@@ -1,0 +1,15 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: enforceingresstls
+metadata:
+  name: enforceingresstls
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "-100"
+spec:
+  parameters:
+    excludedNamePatterns:
+      - cm-acme-http-solver-*
+  match:
+    kinds:
+      - apiGroups: ["extensions", "networking.k8s.io"]
+        kinds: ["Ingress", "Ingresses"]

@@ -1,0 +1,167 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  annotations:
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "-200"
+  creationTimestamp: null
+  name: enforceingresstls
+spec:
+  crd:
+    spec:
+      names:
+        kind: enforceingresstls
+      validation:
+        openAPIV3Schema:
+          properties:
+            excludedNamePatterns:
+              items:
+                type: string
+              type: array
+  targets:
+  - rego: "package policies.network.ingress\ninputParams = input.parameters {\n\tinput.parameters\n}\n\nelse
+      = data.inventory.parameters {\n\tdata.inventory.parameters\n}\n\nelse = set()
+      {\n\ttrue\n}\n\nexcludedNamePatterns = {name | name := inputParams.excludedNamePatterns[_]}
+      {\n\tinputParams.excludedNamePatterns\n}\n\nelse = [\"cm-acme-http-solver-*\"]
+      {\n\ttrue\n}\n\nregexMatchesResultList(stringToCheck, patternsList) = matchVerificationList
+      {\n\tmatchVerificationList := [{\"pattern\": pattern, \"match\": match} |\n\t\tpattern
+      := patternsList[_]\n\t\tmatch := re_match(pattern, stringToCheck)\n\t]\n}\n\nreview
+      = input.review {\n\tinput.review\n\tnot input.request\n}\n\nelse = input.request
+      {\n\tinput.request\n\tnot input.review\n}\n\nelse = {\"object\": input, \"oldObject\":
+      null, \"operation\": \"CREATE\"} {\n\tnot input.request\n\tnot input.review\n}\n\nobjectNameMatchFound(patternsList)
+      {\n\tobjName := review.object.metadata.name\n\tnameToPatternMatchList := regexMatchesResultList(objName,
+      patternsList)\n\tany([patternMatch |\n\t\tit := nameToPatternMatchList[_]\n\t\tpatternMatch
+      = it.match\n\t])\n}\n\nobjectNameMatchNotFound(patternsList) {\n\tnot objectNameMatchFound(patternsList)\n}\n\ngetContainerName(containerName)
+      = result {\n\tcontainerName != \"\"\n\tresult := sprintf(\"containerName: %v\\n\",
+      [containerName])\n}\n\nelse = \"\" {\n\ttrue\n}\n\ngetFullField(resource, property,
+      containerType) = result {\n\tresource != \"\"\n\tproperty != \"\"\n\tresult
+      := sprintf(\"field: %v.%v\\n\", [resource, property])\n}\n\nelse = result {\n\tproperty
+      != \"\"\n\tcontainerType != \"\"\n\tmetadata.specPath != \"\"\n\tresult := sprintf(\"field:
+      %v.%v.%v\\n\", [metadata.specPath, containerType, property])\n}\n\nelse = result
+      {\n\tcontainerType != \"\"\n\tmetadata.specPath != \"\"\n\tresult := sprintf(\"field:
+      %v.%v\\n\", [metadata.specPath, containerType])\n}\n\nelse = result {\n\tproperty
+      != \"\"\n\tmetadata.specPath != \"\"\n\tresult := sprintf(\"field: %v.%v\\n\",
+      [metadata.specPath, property])\n}\n\nelse = result {\n\tproperty != \"\"\n\tresult
+      := sprintf(\"field: %v\\n\", [property])\n}\n\nelse = \"\" {\n\ttrue\n}\n\nmetadata
+      = result {\n\tvalidKinds := [\"ReplicaSet\", \"ReplicationController\", \"Deployment\",
+      \"StatefulSet\", \"DaemonSet\", \"Job\"]\n\tany([good | good := review.object.kind
+      == validKinds[_]])\n\tspec := object.get(review.object, \"spec\", {})\n\ttemplate
+      := object.get(spec, \"template\", {})\n\tresult := {\n\t\t\"objectSpec\": object.get(template,
+      \"spec\", {}),\n\t\t\"objectMetadata\": object.get(template, \"metadata\", {}),\n\t\t\"rootMetadata\":
+      object.get(review.object, \"metadata\", {}),\n\t\t\"specPath\": sprintf(\"%v.spec.template.spec\",
+      [lower(review.object.kind)]),\n\t\t\"jsonPath\": \".spec.template.spec\",\n\t\t\"metadataPath\":
+      sprintf(\"%v.spec.template.metadata\", [lower(review.object.kind)]),\n\t}\n}\n\nelse
+      = result {\n\treview.object.kind == \"Pod\"\n\tresult := {\n\t\t\"objectSpec\":
+      object.get(review.object, \"spec\", {}),\n\t\t\"objectMetadata\": object.get(review.object,
+      \"metadata\", {}),\n\t\t\"rootMetadata\": object.get(review.object, \"metadata\",
+      {}),\n\t\t\"specPath\": sprintf(\"%v.spec\", [lower(review.object.kind)]),\n\t\t\"jsonPath\":
+      \".spec\",\n\t\t\"metadataPath\": sprintf(\"%v.metadata\", [lower(review.object.kind)]),\n\t}\n}\n\nelse
+      = result {\n\treview.object.kind == \"CronJob\"\n\tspec := object.get(review.object,
+      \"spec\", {})\n\tjobTemplate := object.get(spec, \"jobTemplate\", {})\n\tjtSpec
+      := object.get(jobTemplate, \"spec\", {})\n\tjtsTemplate := object.get(jtSpec,
+      \"template\", {})\n\tresult := {\n\t\t\"objectSpec\": object.get(jtsTemplate,
+      \"spec\", {}),\n\t\t\"objectMetadata\": object.get(jtsTemplate, \"metadata\",
+      {}),\n\t\t\"rootMetadata\": object.get(review.object, \"metadata\", {}),\n\t\t\"specPath\":
+      sprintf(\"%v.spec.jobtemplate.spec.template.spec\", [lower(review.object.kind)]),\n\t\t\"jsonPath\":
+      \".spec.jobtemplate.spec.template.spec\",\n\t\t\"metadataPath\": sprintf(\"%v.spec.jobtemplate.spec.template.metadata\",
+      [lower(review.object.kind)]),\n\t}\n}\n\ngetFullXPath(property, containerName,
+      containerType) = result {\n\tproperty != \"\"\n\tcontainerName != \"\"\n\tcontainerType
+      != \"\"\n\tmetadata.jsonPath != \"\"\n\tresult := sprintf(\"JSONPath: %v.%v[?(@.name
+      == \\\"%v\\\")].%v\\n\", [metadata.jsonPath, containerType, containerName, property])\n}\n\nelse
+      = result {\n\tcontainerName != \"\"\n\tcontainerType != \"\"\n\tmetadata.specPath
+      != \"\"\n\tresult := sprintf(\"JSONPath: %v.%v[?(@.name == \\\"%v\\\")]\\n\",
+      [metadata.jsonPath, containerType, containerName])\n}\n\nelse = result {\n\tproperty
+      != \"\"\n\tmetadata.jsonPath != \"\"\n\tresult := sprintf(\"JSONPath: %v.%v\\n\",
+      [metadata.jsonPath, property])\n}\n\nelse = result {\n\tproperty != \"\"\n\tresult
+      := sprintf(\"JSONPath: .%v\\n\", [property])\n}\n\nelse = \"\" {\n\ttrue\n}\n\ngetValidValues(validValues)
+      = result {\n\tvalidValues != \"\"\n\tresult := sprintf(\"validValues: %v\\n\",
+      [validValues])\n}\n\nelse = \"\" {\n\ttrue\n}\n\nobjectApiVersion = sprintf(\"%s\",
+      [review.object.apiVersion]) {\n\treview.object.apiVersion\n}\n\nelse = \"Unknown\"
+      {\n\ttrue\n}\n\nobjectKind = sprintf(\"%s\", [review.object.kind]) {\n\treview.object.kind\n}\n\nelse
+      = \"Unknown\" {\n\ttrue\n}\n\nobjectName = sprintf(\"%s\", [review.object.metadata.name])
+      {\n\treview.object.metadata.name\n}\n\nelse = \"Unknown\" {\n\ttrue\n}\n\ninputObject
+      = {\n\t\"review\": input.review,\n\t\"parameters\": inputParams,\n} {\n\tinput.review\n\tnot
+      input.request\n}\n\nelse = {\"review\": input.request, \"parameters\": inputParams}
+      {\n\tinput.request\n\tnot input.review\n}\n\nelse = {\"review\": {\"object\":
+      input, \"oldObject\": null, \"operation\": \"CREATE\"}, \"parameters\": inputParams}
+      {\n\tnot input.request\n\tnot input.review\n}\n\nobjectNamespace = inputObject.review.object.metadata.namespace
+      {\n\tinputObject.review.object.metadata\n\tinputObject.review.object.metadata.namespace\n}\n\nelse
+      = data.inventory.conftestnamespace {\n\tdata.inventory.conftestnamespace\n}\n\nelse
+      = \"default\" {\n\ttrue\n}\n\nprintReasonWithObject(policyName, reason, resource,
+      property, containerName, containerType, validValues) = result {\n\ttitle :=
+      sprintf(\"%v violated: %v\\n\\n\", [policyName, reason])\n\tcontainer := getContainerName(containerName)\n\tfullField
+      := getFullField(resource, property, containerType)\n\tvv := getValidValues(validValues)\n\tobject
+      := sprintf(\"object:\\n  apiVersion: %v\\n  kind: %v\\n  metadata:\\n    name:
+      %v\\n    namespace: %v\\n\", [objectApiVersion, objectKind, objectName, objectNamespace])\n\tjsonPath
+      := getFullXPath(property, containerName, containerType)\n\tresult := concat(\"\",
+      [title, container, fullField, vv, \"\\n\", object, jsonPath])\n}\n\nexclusionAnnotationsPrefixes
+      = [\"phylake.io/policy.exclusion.\", \"cloud.syncier.com/policy.exclusion.\"]\n\n\nisValidExclusionAnnotation(annotation)
+      {\n\tcount([it |\n\t\tit := exclusionAnnotationsPrefixes[_]\n\t\tstartswith(annotation,
+      it)\n\t]) > 0\n}\n\nelse = false {\n\ttrue\n}\n\ngetPolicyExclusionAnnotations(object)
+      = exclusionAnnotations {\n\tannotations := object.metadata.annotations\n\tnot
+      is_null(annotations)\n\texclusionAnnotations := [i |\n\t\tannotations[i]\n\t\tisValidExclusionAnnotation(i)\n\t]\n}\n\nelse
+      = [] {\n\ttrue\n}\n\ngetPolicyExclusionAnnotationsAtNamespaceLevel(object) =
+      exclusionAnnotations {\n\tannotations := data.inventory.cluster.v1.Namespace[objectNamespace].metadata.annotations\n\tnot
+      is_null(annotations)\n\texclusionAnnotations := [i |\n\t\tannotations[i]\n\t\tisValidExclusionAnnotation(i)\n\t]\n}\n\nelse
+      = [] {\n\ttrue\n}\n\nhas_field(object, field) {\n\t_ = object[field]\n}\n\ngetPolicyExclusionAnnotationsAtTemplateLevel(object)
+      = exclusionAnnotations {\n\thas_field(object, \"spec\")\n\thas_field(object.spec,
+      \"template\")\n\thas_field(object.spec.template, \"metadata\")\n\thas_field(object.spec.template.metadata,
+      \"annotations\")\n\tannotations := object.spec.template.metadata.annotations\n\tnot
+      is_null(annotations)\n\texclusionAnnotations := [i |\n\t\tannotations[i]\n\t\tisValidExclusionAnnotation(i)\n\t]\n}\n\nelse
+      = [] {\n\ttrue\n}\n\ngetOwnerFor(reference, namespace) = owner {\n\tis_string(namespace)\n\tcount(namespace)
+      > 0\n\towner := data.inventory.namespace[namespace][reference.apiVersion][reference.kind][reference.name]\n\tnot
+      is_null(owner)\n}\n\nelse = owner {\n\towner := data.inventory.cluster[reference.apiVersion][reference.kind][reference.name]\n\tnot
+      is_null(owner)\n}\n\nelse = null {\n\ttrue\n}\n\ngetPolicyExclusionAnnotationsOnOwners(object)
+      = exclusionAnnotations {\n\tparents := [owner |\n\t\treference := object.metadata.ownerReferences[_]\n\t\towner
+      := getOwnerFor(reference, object.metadata.namespace)\n\t\tnot is_null(owner)\n\t]\n\n\tgrandParents
+      := [owner |\n\t\tmetadata := parents[_].metadata\n\t\treference := metadata.ownerReferences[_]\n\t\towner
+      := getOwnerFor(reference, metadata.namespace)\n\t\tnot is_null(owner)\n\t]\n\n\towners
+      := array.concat(parents, grandParents)\n\texclusionAnnotations := [annotation
+      |\n\t\towners[_].metadata.annotations[annotation]\n\t\tisValidExclusionAnnotation(annotation)\n\t]\n}\n\nisExclusionAnnotationForConstraint(annotation,
+      constraintName) {\n\tcount([it |\n\t\tit := exclusionAnnotationsPrefixes[_]\n\t\texclusionAnnotation
+      := concat(\"\", [it, constraintName])\n\t\tannotation == exclusionAnnotation\n\t])
+      > 0\n}\n\nelse = false {\n\ttrue\n}\n\nthereIsExclusionAnnotationForConstraint(constraintName)
+      {\n\tnot inputParams.ignoreRiskAcceptances\n\texclusionAnnotationsObjectLevel
+      := getPolicyExclusionAnnotations(review.object)\n\texclusionAnnotationsTemplateLevel
+      := getPolicyExclusionAnnotationsAtTemplateLevel(review.object)\n\texclusionAnnotationsNamespaceLevel
+      := getPolicyExclusionAnnotationsAtNamespaceLevel(review.object)\n\texclusionAnnotationsOwners
+      := getPolicyExclusionAnnotationsOnOwners(review.object)\n\texclusionAnnotations
+      := array.concat(exclusionAnnotationsObjectLevel, array.concat(exclusionAnnotationsTemplateLevel,
+      array.concat(exclusionAnnotationsNamespaceLevel, exclusionAnnotationsOwners)))\n\n\tcount([it
+      |\n\t\tit := exclusionAnnotations[_]\n\t\tisExclusionAnnotationForConstraint(it,
+      constraintName)\n\t]) > 0\n}\n\nelse = false {\n\ttrue\n}\n\nthereIsNoExclusionAnnotationForConstraint(constraintName)
+      {\n\tnot thereIsExclusionAnnotationForConstraint(constraintName)\n}\n\nelse
+      = false {\n\ttrue\n}\n\nrule[reason] {\n\treview.object.kind == \"Ingress\"\n\tthereIsNoExclusionAnnotationForConstraint(\"enforceingresstls\")\n\tobjectNameMatchNotFound(excludedNamePatterns)\n\tnot
+      review.object.spec.tls\n\treason := printReasonWithObject(\"EnforceIngressTLS\",
+      \"Should have TLS enabled\", \"ingress\", \"spec.tls\", \"\", \"\", \"\")\n}\n\nrule[reason]
+      {\n\treview.object.kind == \"Ingress\"\n\tthereIsNoExclusionAnnotationForConstraint(\"enforceingresstls\")\n\tobjectNameMatchNotFound(excludedNamePatterns)\n\tentry
+      := review.object.spec.tls[_]\n\tnot entry.secretName\n\treason := printReasonWithObject(\"EnforceIngressTLS\",
+      \"Should have secretName within TLS config\", \"ingress\", \"spec.tls.secretName\",
+      \"\", \"\", \"\")\n}\n\nhasOldObject {\n\thas_field(review, \"oldObject\")\n\tnot
+      is_null(review.oldObject)\n\treview.oldObject != {}\n}\n\nobjResult = input
+      {\n\tis_object(input)\n\tis_string(input.msg)\n}\n\nelse = {\"msg\": input}
+      {\n\tis_string(input)\n}\n\nelse = {\"msg\": \"Invalid input given. See details
+      for more information about.\", \"details\": input} {\n\ttrue\n}\n\nviolation[reason]
+      {\n\tnot hasOldObject\n\n\treview.object\n\tresults := rule with input as inputObject\n\n\tresult
+      := results[_]\n\treason = objResult with input as result\n\ttrace(json.marshal(reason))\n}\n\nresource
+      = sprintf(\"%s/%s (%s)\", [review.object.kind, review.object.metadata.name,
+      review.object.metadata.namespace]) {\n\treview.object.kind\n\treview.object.metadata.name\n\treview.object.metadata.namespace\n}\n\nelse
+      = sprintf(\"%s/%s\", [review.object.kind, review.object.metadata.name]) {\n\treview.object.kind\n\treview.object.metadata.name\n}\n\nelse
+      = review.object.kind {\n\treview.object.kind\n}\n\nelse = \"Unknown\" {\n\ttrue\n}\n\nviolation[reason]
+      {\n\treview.operation == \"UPDATE\"\n\tnot is_null(review.object)\n\treview.object
+      != {}\n\thasOldObject\n\n\tcachedInput := inputObject\n\n\tnewViolations :=
+      rule with input as cachedInput\n\ttrace(concat(\"\", [\"NEW_VIOLATIONS:\", json.marshal(newViolations)]))\n\n\toldViolations
+      := rule with input as {\n\t\t\"review\": {\"object\": cachedInput.review.oldObject},\n\t\t\"parameters\":
+      cachedInput.parameters,\n\t}\n\n\ttrace(concat(\"\", [\"OLD_VIOLATIONS:\", json.marshal(oldViolations)]))\n\n\tcount(newViolations)
+      > count(oldViolations)\n\tdetails := {\n\t\t\"oldViolations\": oldViolations,\n\t\t\"newViolations\":
+      newViolations,\n\t}\n\n\ttrace(concat(\"\", [\"DETAILS:\", json.marshal(details)]))\n\tmsg
+      := sprintf(\"\\n========\\n%s can not be changed due to more violations in the
+      changed object (%v) than the old object (%v): \\n--------\\n%v\\n========\\n\",
+      [resource, count(newViolations), count(oldViolations), yaml.marshal(details)])\n\treason
+      := {\"msg\": msg}\n\ttrace(concat(\"\", [\"REASON:\", json.marshal(reason)]))\n}\n\ndefault
+      is_gatekeeper = false\n\n\nis_gatekeeper {\n\thas_field(input, \"review\")\n\thas_field(input.review,
+      \"object\")\n}\n\nresultMsg(it) = it {\n\tis_string(it)\n}\n\nelse = it.msg
+      {\n\tis_object(it)\n\tit.msg\n}\n\nelse = \"\" {\n\ttrue\n}\n\n"
+    target: admission.k8s.gatekeeper.sh
+status: {}
