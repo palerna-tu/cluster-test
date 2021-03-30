@@ -1,0 +1,16 @@
+apiVersion: phylake.io/v1alpha1
+kind: Cluster
+metadata:
+  name: dev
+spec:
+  tenant: syncier-cloud
+  contact:
+    email: support@syncier.net
+    slack: https://syncier.slack.com/archives/CFH124P51
+  configuration:
+    description: Development cluster used for staging
+    geographicLocation: AWS EU/Frankfurt
+    costCenter: 2001
+    production: false
+    securityLevel: internal
+    disablePRFeedback: false
